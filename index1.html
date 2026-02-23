@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grup Borç Takip (Canlı)</title>
+    
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3037/3037156.png">
+    <link rel="icon" type="image/png" href="https://i.pinimg.com/736x/d1/6d/a9/d16da9cf757b2db671fede5497db4382.jpg">
+    <meta name="theme-color" content="#6200ee">
+
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 10px; margin: 0; }
+        .card { background: white; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 450px; position: relative; }
+        h2, h3 { text-align: center; color: #6200ee; }
+        .user-row { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
+        .positive { color: #2e7d32; font-weight: bold; }
+        .negative { color: #d32f2f; font-weight: bold; }
+        .section { margin-top: 20px; padding: 15px; background: #fff; border-radius: 15px; border: 1px solid #e0e0e0; }
+        .input-group { display: flex; flex-direction: column; gap: 10px; }
+        select, input, button { padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; }
+        button { background: #6200ee; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        button:active { transform: scale(0.95); }
+        .btn-pay { background: #03dac6; color: black; padding: 6px; font-size: 11px; margin-left: 5px; border-radius: 5px; }
+        .btn-mail { background: #ffb74d; color: black; padding: 6px; font-size: 11px; margin-left: 5px; border-radius: 5px; }
+        .history-item { font-size: 12px; color: #555; padding: 5px 0; border-bottom: 1px dashed #ddd; }
+        .btn-reset { background: #ff5252; width: 100%; margin-top: 20px; }
+        #gif-overlay { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; text-align: center; background: rgba(255,255,255,0.95); padding: 20px; border-radius: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.3); width: 280px; }
+        #gif-overlay img { width: 100%; border-radius: 10px; }
+        #loading { text-align: center; color: #666; font-size: 12px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="gif-overlay">
+    <img id="popup-gif" src="" alt="gif">
+    <p id="gif-text" style="font-weight:bold; margin-top:10px;"></p>
+</div>
+
+<div class="card">
+    <h2>Hesaplaşma</h2>
+    <div id="loading">Canlı veritabanına bağlanılıyor...</div>
+    <div id="user-list"></div>
+
+    <div class="section">
+        <h3>Ödeme Planı (Kim Kime Verecek (para)?</h3>
+        <div id="settlements">Herkes ödeşmiş🤙🏻!</div>
+    </div>
+
+    <div class="section">
+        <h3>Yeni Borç Gir</h3>
+        <div class="input-group">
+            <select id="payer">
+                <option value="Sıla">Sıla</option>
+                <option value="Başak">Başak</option>
+                <option value="Melis">Melis</option>
+                <option value="Merve">Merve</option>
+            </select>
+            <input type="number" id="amount" placeholder="Tutar (₺)" />
+            <input type="text" id="category" placeholder="Kategori (Yemek, Market vb.)" />
+            <div id="target-users" style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top:10px;">
+                <label><input type="checkbox" value="Sıla" checked> Sıla</label>
+                <label><input type="checkbox" value="Başak" checked> Başak</label>
+                <label><input type="checkbox" value="Melis" checked> Melis</label>
+                <label><input type="checkbox" value="Merve" checked> Merve</label>
+            </div>
+            <button id="addBtn" onclick="addExpense()">Ekleee</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Son İşlemler</h3>
+        <div id="history-list">Henüz bir işlem yapılmadı.</div>
+    </div>
+
+    <button class="btn-reset" onclick="resetAll()">Borçları sıfırlayalım (Bulut)</button>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, deleteDoc, doc, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // Senin gönderdiğin özel konfigürasyon
+    const firebaseConfig = {
+        apiKey: "AIzaSyC9o7NKd8bXfUGiHmplBnykOvMClPYLy0k",
+        authDomain: "grup-harcama.firebaseapp.com",
+        projectId: "grup-harcama",
+        storageBucket: "grup-harcama.firebasestorage.app",
+        messagingSenderId: "231882424193",
+        appId: "1:231882424193:web:0c5550982c66c963f37280"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const emails = { "Sıla": "silademircan200@gmail.com", "Başak": "cesurbasak@gmail.com", "Melis": "kemikkiranmelis@gmail.com", "Merve": "mervekaragoz910@gmail.com" };
+    
+    // GIF Arşivi
+    const paymentGifs = [
+        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNTJucXh3ZDRtbTZiN241am96cDRoaXI1d3JtejExYTRwajdhbm95byZlcD12MV9naWZzX3NlYXJjaCZjdD1n/JpG2A9P3dPHXaTYrwu/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNTJucXh3ZDRtbTZiN241am96cDRoaXI1d3JtejExYTRwajdhbm95byZlcD12MV9naWZzX3NlYXJjaCZjdD1n/C5cDXxEgBGNjy/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNTJucXh3ZDRtbTZiN241am96cDRoaXI1d3JtejExYTRwajdhbm95byZlcD12MV9naWZzX3NlYXJjaCZjdD1n/eDdEiM0Jq8Ene/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3cms5NnRxczQ2N2pnZ2o0YzdvNndvY2JscjdtbmxyNG1wdzA5ZnZlayZlcD12MV9naWZzX3NlYXJjaCZjdD1n/TpLfalAKqsld0b7gMS/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3NzFmMm9jYTJtMXZpbGdlYTVleHNuNmtwbzR4Nmk3OTE1cm9waGk4byZlcD12MV9naWZzX3NlYXJjaCZjdD1n/cUBopbO2vnco8/giphy.gif",
+        "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3RpbmhjMTJzOHl0dDdtMDVuand4N3B4eXpwenNjZTU3ODB0N2h3NSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/oklSNFVqTCqvBI1pzB/giphy.gif"
+    ];
+    const expenseGifs = [
+        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExODFhbDI2M2g3a2VzYXdqMmQwM2h3YWI5YnoxNm8ybGdxOHJwMmpzbSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/XeQ5g2yEomEHiv2AfO/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3azQyNm94OWowcDYwMXh1amt2MWRnNno4NDRidjF2NmNkZXdtM2M4NyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/l2RbeHTkknU52SfPq/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmpudmk4bWtjYmV0MHhtNHNuemZlNjcwMHYxM3RqbjNqMWdnODgybCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/QUL4i6On4IQA2MdxaK/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmpudmk4bWtjYmV0MHhtNHNuemZlNjcwMHYxM3RqbjNqMWdnODgybCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/3Jtkkuc2iemdi/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3NzBvN2E0dWRuYTJmdWEzaWkwazhqemZqN3BhZ3V2bjhlZWlvdno0aCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/d3mmdNnW5hkoUxTG/giphy.gif",
+        "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3cnNrMHV4eXJxdGI1c290bHNlNzZoMmp0eHRlZW40cHI3emRuYmg3aiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/CTLgE2dALpyr6/giphy.gif"
+    ];
+
+    // Fonksiyonları dışarıya aç
+    window.addExpense = async () => {
+        const p = document.getElementById('payer').value;
+        const a = parseFloat(document.getElementById('amount').value);
+        const c = document.getElementById('category').value || "Genel Harcama";
+        const sel = Array.from(document.querySelectorAll('#target-users input:checked')).map(cb => cb.value);
+        
+        if (!a || sel.length === 0) return alert("Lütfen tutar girin ve en az bir kişi seçin!");
+        
+        document.getElementById('addBtn').disabled = true;
+        try {
+            await addDoc(collection(db, "expenses"), {
+                payer: p, amount: a, category: c, targets: sel, date: Timestamp.now(), type: "expense"
+            });
+            triggerGif('expense');
+            document.getElementById('amount').value = '';
+            document.getElementById('category').value = '';
+        } catch (e) { alert("Bağlantı hatası: " + e); }
+        document.getElementById('addBtn').disabled = false;
+    };
+
+    window.payDebt = async (from, to, amount) => {
+        try {
+            await addDoc(collection(db, "expenses"), {
+                payer: from, amount: amount, category: "Borç Ödendi ✅", targets: [to], date: Timestamp.now(), type: "payment"
+            });
+            triggerGif('payment');
+        } catch (e) { alert("Hata: " + e); }
+    };
+
+    window.sendEmail = (to) => {
+        const s = encodeURIComponent("Türkiye Cumhuriyeti Resmî Bildirimi");
+        const b = encodeURIComponent("Merhaba,\n\nBekleyen bir borç kaydınız bulunmaktadır. Lütfen ilgili IBAN adresine gönderim yapınız.\n\nTeşekkürler.");
+        window.location.href = `mailto:${emails[to]}?subject=${s}&body=${b}`;
+    };
+
+    window.resetAll = async () => {
+        if (!confirm("Her şeyi ödediğinize eminseniz siliyom? siliyim mi??")) return;
+        const q = query(collection(db, "expenses"));
+        const snapshot = await getDocs(q);
+        const deletePromises = snapshot.docs.map(d => deleteDoc(doc(db, "expenses", d.id)));
+        await Promise.all(deletePromises);
+        alert("Veritabanı başarıyla sıfırlandı!");
+    };
+
+    function triggerGif(type) {
+        let chosenGif = type === 'payment' ? (Math.random() < 0.5 ? paymentGifs[5] : paymentGifs[Math.floor(Math.random()*5)]) : expenseGifs[Math.floor(Math.random()*expenseGifs.length)];
+        document.getElementById('popup-gif').src = chosenGif;
+        document.getElementById('gif-text').innerText = type === 'payment' ? "Hesap Kapatıldı! 🤙🏻" : "Borç Buluta Yazıldı! 💸";
+        document.getElementById('gif-overlay').style.display = 'block';
+        setTimeout(() => document.getElementById('gif-overlay').style.display = 'none', 2800);
+    }
+
+    // CANLI DİNLEYİCİ: Herkesin ekranını anlık günceller
+    const q = query(collection(db, "expenses"), orderBy("date", "desc"));
+    onSnapshot(q, (snapshot) => {
+        document.getElementById('loading').style.display = 'none';
+        let users = { "Sıla": 0, "Başak": 0, "Melis": 0, "Merve": 0 };
+        let historyHtml = "";
+        
+        snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            // Bakiye Hesaplama Mantığı
+            if (data.type === "expense") {
+                const share = data.amount / data.targets.length;
+                users[data.payer] += data.amount;
+                data.targets.forEach(t => users[t] -= share);
+            } else if (data.type === "payment") {
+                users[data.payer] += data.amount;
+                users[data.targets[0]] -= data.amount;
+            }
+            
+            // Geçmiş Listesi (Son 5 işlem)
+            if (historyHtml.split('history-item').length <= 6) {
+                historyHtml += `<div class="history-item"><b>${data.payer}</b>: ${data.category} (${data.amount}₺)</div>`;
+            }
+        });
+
+        // Ekrana Yazdır
+        const list = document.getElementById('user-list');
+        list.innerHTML = Object.keys(users).map(name => {
+            const status = users[name] >= 0 ? 'positive' : 'negative';
+            return `<div class="user-row"><span>${name}</span><span class="${status}">${users[name].toFixed(2)} ₺</span></div>`;
+        }).join('');
+        
+        document.getElementById('history-list').innerHTML = historyHtml || "Henüz işlem yok.";
+        calculateSettlements(users);
+    });
+
+    function calculateSettlements(userBalances) {
+        let uArr = Object.keys(userBalances).map(k => ({ name: k, bal: userBalances[k] }));
+        let debtors = uArr.filter(u => u.bal < -0.01).map(u => ({...u, bal: Math.abs(u.bal)}));
+        let creditors = uArr.filter(u => u.bal > 0.01);
+        let html = "", i = 0, j = 0;
+
+        while(i < debtors.length && j < creditors.length) {
+            let amt = Math.min(debtors[i].bal, creditors[j].bal);
+            html += `<div style="margin-bottom:10px; font-size:13px; border-bottom:1px dashed #eee; padding-bottom:5px;"><b>${debtors[i].name}</b> &rarr; <b>${creditors[j].name}</b>: ${amt.toFixed(2)} ₺<br><button class="btn-pay" onclick="payDebt('${debtors[i].name}','${creditors[j].name}',${amt})">Ödendi ✓</button><button class="btn-mail" onclick="sendEmail('${debtors[i].name}')">✉ Hatırlat</button></div>`;
+            debtors[i].bal -= amt; creditors[j].bal -= amt;
+            if(debtors[i].bal < 0.01) i++; if(creditors[j].bal < 0.01) j++;
+        }
+        document.getElementById('settlements').innerHTML = html || "Tüm borçlar kapandı! 🤙🏻";
+    }
+</script>
+</body>
+</html>
